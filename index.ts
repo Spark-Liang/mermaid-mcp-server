@@ -101,7 +101,7 @@ function log(level: LogLevel, message: string) {
 
 // Define tools
 const GENERATE_TOOL: Tool = {
-  name: "generate",
+  name: "generateMermaid",
   description: "Generate PNG image from mermaid markdown",
   inputSchema: {
     type: "object",
@@ -129,6 +129,22 @@ const GENERATE_TOOL: Tool = {
       }
     },
     required: CONTENT_IMAGE_SUPPORTED ? ["code"] : ["code", "name", "folder"]
+  }
+};
+
+// Define verify tool
+const VERIFY_TOOL: Tool = {
+  name: "verifyMermaid",
+  description: "Verify mermaid markdown syntax without generating an image",
+  inputSchema: {
+    type: "object",
+    properties: {
+      code: {
+        type: "string",
+        description: "The mermaid markdown to verify"
+      }
+    },
+    required: ["code"]
   }
 };
 
@@ -470,7 +486,7 @@ async function processGenerateRequest(args: {
 
 // Tool handlers
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: [GENERATE_TOOL],
+  tools: [GENERATE_TOOL, VERIFY_TOOL],
 }));
 
 // Set up the request handler for tool calls
@@ -484,14 +500,46 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     log(LogLevel.INFO, `Received request: ${name} with args: ${JSON.stringify(args)}`);
 
-    if (name === "generate") {
+    if (name === GENERATE_TOOL.name) {
       log(LogLevel.INFO, "Rendering Mermaid PNG");
       if (!isGenerateArgs(args)) {
-        throw new Error("Invalid arguments for generate");
+        throw new Error(`Invalid arguments for ${GENERATE_TOOL.name}`);
       }
       
       // Process the generate request
       return await processGenerateRequest(args);
+    } else if (name === VERIFY_TOOL.name) {
+      log(LogLevel.INFO, "Verifying Mermaid code");
+      if (typeof args !== 'object' || args === null || !('code' in args) || typeof (args as any).code !== 'string') {
+        throw new Error(`Invalid arguments for ${VERIFY_TOOL.name}`);
+      }
+      
+      try {
+        // 尝试渲染，但不保存或返回结果，只是为了验证语法
+        await renderMermaidPng((args as {code: string}).code, {});
+        
+        // 如果没有抛出错误，则代码是有效的
+        return {
+          content: [
+            {
+              type: "text",
+              text: "Mermaid代码语法验证通过 ✅",
+            }
+          ],
+          isError: false,
+        };
+      } catch (error) {
+        // 复用错误处理，但提供更友好的消息
+        const errorResponse = handleMermaidError(error);
+        errorResponse.content[0].text = errorResponse.content[0].text.replace(
+          "Mermaid syntax error:",
+          "Mermaid语法错误 ❌:"
+        ).replace(
+          "Error generating diagram:",
+          "Mermaid验证错误 ❌:"
+        );
+        return errorResponse;
+      }
     }
 
     return {
